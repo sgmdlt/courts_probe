@@ -1,0 +1,67 @@
+modules:
+  http_head_via_proxy0:
+    prober: http
+    timeout: 20s
+    http:
+      method: HEAD
+      proxy_url: http://GVb476Qr:MNzbwvCo@45.87.253.15:3000
+      valid_status_codes: [200, 301, 302, 303, 307, 308]
+      preferred_ip_protocol: "ip4"
+      skip_resolve_phase_with_proxy: true
+      no_follow_redirects: false
+      tls_config:
+        insecure_skip_verify: true
+
+  http_head_via_proxy1:
+    prober: http
+    timeout: 20s
+    http:
+      method: HEAD
+      proxy_url: http://GVb476Qr:MNzbwvCo@45.87.253.15:3000
+      valid_status_codes: [200, 301, 302, 303, 307, 308]
+      preferred_ip_protocol: "ip4"
+      skip_resolve_phase_with_proxy: true
+      no_follow_redirects: false
+      tls_config:
+        insecure_skip_verify: true
+
+  http_head_via_proxy2:
+    prober: http
+    timeout: 20s
+    http:
+      method: HEAD
+      proxy_url: http://GVb476Qr:MNzbwvCo@45.87.253.15:3000
+      valid_status_codes: [200, 301, 302, 303, 307, 308]
+      preferred_ip_protocol: "ip4"
+      skip_resolve_phase_with_proxy: true
+      no_follow_redirects: false
+      tls_config:
+        insecure_skip_verify: true
+
+  http_head_via_proxy3:
+    prober: http
+    timeout: 20s
+    http:
+      method: HEAD
+      proxy_url: http://GVb476Qr:MNzbwvCo@188.130.220.70:3000
+      valid_status_codes: [200, 301, 302, 303, 307, 308]
+      preferred_ip_protocol: "ip4"
+      skip_resolve_phase_with_proxy: true
+      no_follow_redirects: false
+      tls_config:
+        insecure_skip_verify: true
+
+#  http_get_keyword_via_proxy1:
+#    prober: http
+#    timeout: 12s
+#    http:
+#      method: GET
+#      proxy_url: http://127.0.0.1:8888
+#      valid_status_codes: [200]
+#      preferred_ip_protocol: "ip4"
+#      no_follow_redirects: false
+#      tls_config:
+#        insecure_skip_verify: false
+#      # Проверка ключевого слова в теле:
+#      fail_if_body_not_matches_regexp:
+#        - "(?i)суд"

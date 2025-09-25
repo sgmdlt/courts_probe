@@ -1,0 +1,68 @@
+{
+  "id": null,
+  "title": "Court Uptime (Minimal)",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Up targets (last probe)",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(probe_success)", "legendFormat": "up", "refId": "A" }
+      ],
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "probe_success per target",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "probe_success",
+          "legendFormat": "{{instance}} ({{job}})",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP status code",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "label_replace(probe_http_status_code, \"code\", \"$1\", \"status_code\", \"(.*)\")",
+          "legendFormat": "{{instance}} code={{code}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 }
+    },
+    {
+      "type": "timeseries",
+      "title": "TTFB / Duration (s)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "probe_http_duration_seconds{phase=\"connect\"}",
+          "legendFormat": "{{instance}} connect",
+          "refId": "A"
+        },
+        {
+          "expr": "probe_http_duration_seconds{phase=\"tls\"}",
+          "legendFormat": "{{instance}} tls",
+          "refId": "B"
+        },
+        {
+          "expr": "probe_duration_seconds",
+          "legendFormat": "{{instance}} total",
+          "refId": "C"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 21 }
+    }
+  ]
+}
