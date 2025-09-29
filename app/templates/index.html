@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Мониторинг доступности судов</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  <header class="page-header">
+    <h1>Мониторинг доступности судов</h1>
+    <p>
+      Всего: <strong>{{ total }}</strong>
+      · Доступно: <strong class="status-up">{{ up_count }}</strong>
+      · Недоступно: <strong class="status-down">{{ down_count }}</strong>
+      · Ожидают: <strong class="status-pending">{{ pending_count }}</strong>
+    </p>
+    <p class="meta">Последнее обновление: {{ last_updated.isoformat() if last_updated else '—' }}</p>
+  </header>
+
+  <section>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>URL</th>
+          <th>Проверка</th>
+          <th>Прокси</th>
+          <th>Статус</th>
+          <th>Ответ</th>
+          <th>Метод</th>
+          <th>Задержка, мс</th>
+          <th>Проверено</th>
+          <th>Ошибка</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in statuses %}
+        <tr class="{% if item.is_up %}is-up{% elif item.is_down %}is-down{% else %}is-pending{% endif %}">
+          <td>{{ loop.index }}</td>
+          <td class="url"><a href="{{ item.target }}" target="_blank" rel="noopener noreferrer">{{ item.target }}</a></td>
+          <td>{{ item.probe_name }}</td>
+          <td>{{ item.proxy_display or '—' }}</td>
+          <td class="{% if item.is_up %}status-up{% elif item.is_down %}status-down{% else %}status-pending{% endif %}">{{ 'UP' if item.is_up else ('DOWN' if item.is_down else 'WAIT') }}</td>
+          <td>{{ item.status_code if item.checked_at else '—' }}</td>
+          <td>{{ item.method if item.checked_at else '—' }}</td>
+          <td>{% if item.latency_ms is not none %}{{ '%.1f'|format(item.latency_ms) }}{% else %}—{% endif %}</td>
+          <td>{{ item.checked_at_iso }}</td>
+          <td class="error">{{ item.error or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>
