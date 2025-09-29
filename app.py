@@ -94,7 +94,7 @@ async def health() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
-    statuses = sorted(_statuses.values(), key=lambda item: item.sort_key, reverse=True)
+    statuses = sorted(_statuses.values(), key=lambda item: item.sort_key)
     total = len(statuses)
     up_count = sum(1 for status in statuses if status.is_up)
     down_count = sum(1 for status in statuses if status.is_down)
@@ -282,6 +282,7 @@ def log_retry(retry_state: RetryCallState) -> None:
     if exc:
         message += f": {exc!r}"
     print(message)
+
 
 @retry(
     wait=wait_random(5, 8),
