@@ -30,3 +30,8 @@ py-modules = ["app"]
 [tool.setuptools.packages.find]
 include = []
 exclude = ["data"]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.30.1",
+]

@@ -43,7 +43,10 @@ DB_PATH = DATA_DIR / "monitor.sqlite"
 
 @dataclass(slots=True)
 class StatusRecord:
-    target: str
+    region_code: str
+    region_name: str
+    court_code: str
+    url: str
     probe_name: str
     method: str
     success: bool
@@ -78,7 +81,7 @@ class StatusRecord:
         return (state, self.checked_at or baseline)
 
 
-_statuses: Dict[str, StatusRecord] = {}
+_statuses: Dict[tuple, StatusRecord] = {}
 _monitor_task: Optional[asyncio.Task[None]] = None
 _stop_event = asyncio.Event()
 
@@ -90,6 +93,11 @@ if (APP_DIR / "static").exists():
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+@app.get("/court_list")
+async def court_list():
+    court_list = _load_targets()
+    return court_list
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -160,8 +168,8 @@ async def _monitor_loop() -> None:
         _ensure_status_placeholders(targets)
         semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
         tasks = [
-            asyncio.create_task(_check_target(url, semaphore), name=f"check:{url}")
-            for url in targets
+            asyncio.create_task(_check_target(court, semaphore), name=f"check:{court}")
+            for court in targets
         ]
         if tasks:
             logger.info("Монитор запущен")
@@ -185,10 +193,10 @@ def _load_targets() -> Sequence[str]:
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT url FROM courts WHERE url <> '' ORDER BY code"
+            "SELECT region_code, region_name, court_code, url FROM courts WHERE url <> '' ORDER BY court_code"
         ).fetchall()
     print(len(rows))
-    return [row["url"] for row in rows]
+    return [(row["region_code"], row["region_name"], row["court_code"], row["url"]) for row in rows]
 
 
 def _initialize_status_cache() -> None:
@@ -199,12 +207,16 @@ def _initialize_status_cache() -> None:
     _ensure_status_placeholders(targets)
 
 
-def _ensure_status_placeholders(targets: Sequence[str]) -> None:
-    for url in targets:
+def _ensure_status_placeholders(courts: Sequence[str]) -> None:
+    for court in courts:
+        region_code, region_name, court_code, url = court
         if url in _statuses:
             continue
-        _statuses[url] = StatusRecord(
-            target=url,
+        _statuses[court] = StatusRecord(
+            region_code=region_code,
+            region_name=region_name,
+            court_code=court_code,
+            url=url,
             probe_name="—",
             method="—",
             success=False,
@@ -218,7 +230,10 @@ def _ensure_status_placeholders(targets: Sequence[str]) -> None:
 
 def _build_status_record(
     *,
-    target: str,
+    region_code: str,
+    region_name: str,
+    court_code: str,
+    url: str,
     method: str,
     success: bool,
     status_code: Optional[int],
@@ -227,7 +242,10 @@ def _build_status_record(
     proxy_display: Optional[str],
 ) -> StatusRecord:
     return StatusRecord(
-        target=target,
+        region_code=region_code,
+        region_name=region_name,
+        court_code=court_code,
+        url=url,
         probe_name="default",
         method=method,
         success=success,
@@ -245,14 +263,18 @@ def _retry_failure_record(retry_state: RetryCallState) -> StatusRecord:
     if isinstance(record, StatusRecord):
         return record
 
-    url = (
-        retry_state.kwargs.get("url")
-        if retry_state.kwargs and "url" in retry_state.kwargs
+    court = (
+        retry_state.kwargs.get("court")
+        if retry_state.kwargs and "court" in retry_state.kwargs
         else (retry_state.args[0] if retry_state.args else "<unknown>")
     )
+    region_code, region_name, court_code, url = court
     proxy = retry_state.kwargs.get("proxy") if retry_state.kwargs else None
     return _build_status_record(
-        target=url,
+        region_code=region_code,
+        region_name=region_name,
+        court_code=court_code,
+        url=url,
         method="HEAD",
         success=False,
         status_code=None,
@@ -263,9 +285,9 @@ def _retry_failure_record(retry_state: RetryCallState) -> StatusRecord:
 
 
 def log_retry(retry_state: RetryCallState) -> None:
-    url = (
-        retry_state.kwargs.get("url")
-        if retry_state.kwargs and "url" in retry_state.kwargs
+    court = (
+        retry_state.kwargs.get("court")
+        if retry_state.kwargs and "court" in retry_state.kwargs
         else (retry_state.args[0] if retry_state.args else "<unknown>")
     )
     attempt = getattr(retry_state, "attempt_number", None)
@@ -276,7 +298,7 @@ def log_retry(retry_state: RetryCallState) -> None:
     except Exception:
         pass
 
-    message = f"Ретрай попытка {attempt}/10 для {url}"
+    message = f"Ретрай попытка {attempt}/10 для {court}"
     if isinstance(sleep, (int, float)):
         message += f" (пауза {sleep:.1f} сек)"
     if exc:
@@ -292,7 +314,7 @@ def log_retry(retry_state: RetryCallState) -> None:
     retry_error_callback=_retry_failure_record,
     retry=retry_if_exception_type(httpx.RequestError),
 )
-async def _probe_target(*, url: str, proxy: str) -> StatusRecord:
+async def _probe_target(*, court: tuple, proxy: str) -> StatusRecord:
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(REQUEST_TIMEOUT_SECONDS, read=35.0),
         follow_redirects=True,
@@ -302,13 +324,16 @@ async def _probe_target(*, url: str, proxy: str) -> StatusRecord:
     ) as client:
         started = time.perf_counter()
         method_used = "HEAD"
-
+        region_code, region_name, court_code, url = court
         try:
             response = await client.request(method_used, url)
         except httpx.RequestError as exc:
             latency_ms = (time.perf_counter() - started) * 1000
             record = _build_status_record(
-                target=url,
+                region_code=region_code,
+                region_name=region_name,
+                court_code=court_code,
+                url=url,
                 method=method_used,
                 success=False,
                 status_code=None,
@@ -331,7 +356,10 @@ async def _probe_target(*, url: str, proxy: str) -> StatusRecord:
         latency_ms = (time.perf_counter() - started) * 1000
 
         return _build_status_record(
-            target=url,
+            region_code=region_code,
+            region_name=region_name,
+            court_code=court_code,
+            url=url,
             method=method_used,
             success=success,
             status_code=status_code,
@@ -341,8 +369,8 @@ async def _probe_target(*, url: str, proxy: str) -> StatusRecord:
         )
 
 
-async def _check_target(url: str, semaphore: asyncio.Semaphore) -> None:
+async def _check_target(court: tuple, semaphore: asyncio.Semaphore) -> None:
     proxy = get_proxy()
     async with semaphore:
-        record = await _probe_target(url=url, proxy=proxy)
-        _statuses[url] = record
+        record = await _probe_target(court=court, proxy=proxy)
+        _statuses[court] = record

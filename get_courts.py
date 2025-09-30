@@ -32,32 +32,72 @@ SUBJ_LINK = (
     "&court_name=&court_subj={code}&court_type=0&court_okrug=0&vcourt_okrug=0"
 ).format
 
-PROXY_FILE = Path("proxy")
 COURTS_CSV = Path("courts.csv")
 DATA_DIR = Path("data")
 DB_PATH = DATA_DIR / "monitor.sqlite"
 
-PROXIES: Sequence[str] = ()
-
-
-def load_proxies() -> Sequence[str]:
-    if not PROXY_FILE.exists():
-        return ()
-    proxies: List[str] = []
-    for raw in PROXY_FILE.read_text(encoding="utf-8").splitlines():
-        value = raw.strip()
-        if not value:
-            continue
-        if not value.startswith("http://") and not value.startswith("https://"):
-            value = f"http://{value}"
-        proxies.append(value)
-    return proxies
+PROXY_PATH = Path("proxy")
+PROXIES = [f"http://{p}".strip() for p in PROXY_PATH.open().readlines()]
 
 
 def pick_proxy() -> str:
     if not PROXIES:
         raise RuntimeError("Proxy list is empty")
     return random.choice(PROXIES)
+
+
+
+# (region_code, region_name, court_code), court_url
+def write_csv(rows: Iterable[Tuple[str, str]]) -> None:
+    with COURTS_CSV.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        for court, url in rows:
+            writer.writerow([*court, url])
+    print(f"CSV обновлён: {COURTS_CSV.resolve()}")
+
+# (region_code, region_name, court_code), court_url
+def sync_db(rows: Sequence[Tuple[str, str]]):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    rows = [(*row[0], row[1]) for row in rows]
+    print(len(rows))
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS courts (
+                court_code TEXT PRIMARY KEY,
+                region_code TEXT NOT NULL,
+                region_name TEXT NOT NULL,
+                url TEXT NOT NULL
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO courts(region_code, region_name, court_code, url) VALUES(?, ?, ?, ?)\n"
+            "ON CONFLICT(court_code) DO UPDATE SET url=excluded.url",
+            rows,
+        )
+        conn.commit()
+    print(f"SQLite обновлён: {DB_PATH.resolve()}")
+
+
+async def fetch_region_codes() -> List[str]:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(25.0, read=35.0),
+        verify=False,
+        follow_redirects=True,
+        headers=HEADERS,
+        proxy=pick_proxy(),
+    ) as client:
+        resp = await client.get(REGION_LIST_URL)
+        resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "lxml")
+    select = soup.find(id="court_subj")
+    if not select:
+        raise RuntimeError("Не найден список регионов court_subj")
+    regions = [(opt["value"], opt.get_text()) for opt in select.find_all("option") if opt.get("value")]
+    filtered = [(code, name) for code, name in regions if code not in ("0", "97")]
+    print(f"Получено кодов регионов: {filtered}")
+    return filtered
 
 
 def log_retry(retry_state: RetryCallState) -> None:
@@ -83,70 +123,13 @@ def log_retry(retry_state: RetryCallState) -> None:
     print(message)
 
 
-def write_csv(rows: Iterable[Tuple[str, str]]) -> None:
-    with COURTS_CSV.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        for code, url in rows:
-            writer.writerow([code, url])
-    print(f"CSV обновлён: {COURTS_CSV.resolve()}")
-
-
-def sync_db(rows: Sequence[Tuple[str, str]]):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS courts (
-                code TEXT PRIMARY KEY,
-                url TEXT NOT NULL
-            )
-            """
-        )
-        conn.executemany(
-            "INSERT INTO courts(code, url) VALUES(?, ?)\n"
-            "ON CONFLICT(code) DO UPDATE SET url=excluded.url",
-            rows,
-        )
-        if rows:
-            codes = [code for code, _ in rows]
-            placeholders = ",".join("?" for _ in codes)
-            conn.execute(
-                f"DELETE FROM courts WHERE code NOT IN ({placeholders})",
-                codes,
-            )
-        else:
-            conn.execute("DELETE FROM courts")
-        conn.commit()
-    print(f"SQLite обновлён: {DB_PATH.resolve()}")
-
-
-async def fetch_region_codes() -> List[str]:
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(25.0, read=35.0),
-        verify=False,
-        follow_redirects=True,
-        headers=HEADERS,
-        proxy=pick_proxy(),
-    ) as client:
-        resp = await client.get(REGION_LIST_URL)
-        resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "lxml")
-    select = soup.find(id="court_subj")
-    if not select:
-        raise RuntimeError("Не найден список регионов court_subj")
-    codes = [opt["value"] for opt in select.find_all("option") if opt.get("value")]
-    filtered = [code for code in codes if code not in {"0", "97"}]
-    print(f"Получено кодов регионов: {len(filtered)}")
-    return filtered
-
-
 @retry(
     wait=wait_random_exponential(multiplier=5, max=30) + wait_random(1, 3),
     stop=stop_after_attempt(10),
     reraise=True,
     before_sleep=log_retry,
 )
-async def get_courts_for_region(code: str) -> List[Tuple[str, str]]:
+async def get_courts_for_region(region: tuple) -> List[Tuple[str, str, str]]:
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(25.0, read=35.0),
         verify=False,
@@ -154,51 +137,51 @@ async def get_courts_for_region(code: str) -> List[Tuple[str, str]]:
         headers=HEADERS,
         proxy=pick_proxy(),
     ) as client:
-        resp = await client.get(SUBJ_LINK(code=code))
+        region_code, region_name = region
+        resp = await client.get(SUBJ_LINK(code=region_code))
         resp.raise_for_status()
 
-    print(f"[{code}] HTTP {resp.status_code}")
+    print(f"[{region_code}] HTTP {resp.status_code}")
     soup = BeautifulSoup(resp.text, "lxml")
     ul = soup.find("ul", class_="search-results")
     if not ul:
-        print(f"[{code}] предупреждение: блок результатов не найден")
+        print(f"[{region_code}] предупреждение: блок результатов не найден")
         return []
 
     items = ul.find_all("li")
-    result: List[Tuple[str, str]] = []
+    result = []
     for li in items:
         b_tag = li.find("b", string="Классификационный код:")
         link_tag = li.find("a", target="_blank")
-        class_code = b_tag.next_sibling.strip() if b_tag and b_tag.next_sibling else ""
-        href = link_tag["href"].strip() if link_tag and link_tag.get("href") else ""
-        if class_code and href:
-            result.append((class_code, href))
+        court_code = b_tag.next_sibling.strip() if b_tag and b_tag.next_sibling else ""
+        court_url = link_tag["href"].strip() if link_tag and link_tag.get("href") else ""
+        if court_code and court_url:
+            result.append((region_code, region_name, court_code, court_url))
     return result
 
 
-async def fetch_all_courts(codes_list, concurrency):
+async def fetch_all_courts(regions, concurrency):
     sem = asyncio.Semaphore(concurrency)
 
-    async def _wrapped(code):
+    async def _wrapped(region):
         async with sem:
-            pairs = await get_courts_for_region(code)
-            return [(cls, href) for (cls, href) in pairs]
+            return await get_courts_for_region(region)
 
-    tasks = [_wrapped(code) for code in codes_list]
+    tasks = [_wrapped(region) for region in regions]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     ok = []
     failed = []
-    for code, r in zip(codes_list, results):
+    for region, r in zip(regions, results):
         if isinstance(r, Exception):
-            failed.append(code)
+            failed.append(region)
         else:
             ok.extend(r)
     return ok, failed
 
 
-async def fetch_all_regions_rounds(codes_list, max_rounds, concurrency):
-    remaining = list(codes_list)
+async def fetch_all_regions_rounds(regions, max_rounds, concurrency):
+    remaining = list(regions)
     total_ok = []
 
     for round_idx in range(1, max_rounds + 1):
@@ -236,27 +219,25 @@ async def fetch_all_regions_rounds(codes_list, max_rounds, concurrency):
 
     return total_ok, remaining
 
-
-def deduplicate(rows: Iterable[Tuple[str, str]]) -> List[Tuple[str, str]]:
+# region_code, region_name, court_code, court_url
+def deduplicate(rows) -> List[Tuple[str, str]]:
     unique: dict[str, str] = {}
-    for code, url in rows:
-        code = code.strip()
-        url = url.strip()
-        if not code or not url:
+    for region_code, region_name, court_code, court_url in rows:
+        court_code = court_code.strip()
+        court_url = court_url.strip()
+        if not court_code or not court_url:
             continue
-        unique[code] = url
+        unique[(region_code, region_name, court_code)] = court_url
     return sorted(unique.items())
 
 
 async def main() -> None:
-    global PROXIES
-    PROXIES = load_proxies()
     if not PROXIES:
         raise SystemExit("Файл proxy пуст или отсутствует")
 
-    codes = await fetch_region_codes()
+    regions = await fetch_region_codes()
     all_rows, failed = await fetch_all_regions_rounds(
-        codes, max_rounds=3, concurrency=6
+        regions, max_rounds=3, concurrency=6
     )
     rows = deduplicate(all_rows)
     print(f"Собрано записей: {len(rows)}")

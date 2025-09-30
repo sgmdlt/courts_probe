@@ -1,14 +1,21 @@
 services:
-  app:
+  courts_probe:
     build: .
-    container_name: courts-uptime
+    container_name: courts-probe
     environment:
       - HOST=0.0.0.0
       - PORT=8000
     ports:
-      - "8000:8000"
+      - "8012:8000"
     volumes:
       - ./data:/app/data
       - ./courts.csv:/app/courts.csv
       - ./proxy:/app/proxy:ro
     restart: unless-stopped
+    networks:
+      - proxy-net
+
+
+networks:
+  proxy-net:
+    external: true

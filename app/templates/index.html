@@ -21,7 +21,8 @@
     <table>
       <thead>
         <tr>
-          <th>#</th>
+          <th>Регион</th>
+          <th>Код</th>
           <th>URL</th>
           <th>Проверка</th>
           <th>Прокси</th>
@@ -36,8 +37,9 @@
       <tbody>
         {% for item in statuses %}
         <tr class="{% if item.is_up %}is-up{% elif item.is_down %}is-down{% else %}is-pending{% endif %}">
-          <td>{{ loop.index }}</td>
-          <td class="url"><a href="{{ item.target }}" target="_blank" rel="noopener noreferrer">{{ item.target }}</a></td>
+          <td>{{ item.region_code }}:{{ item.region_name }}</td>
+          <td>{{ item.court_code }}</td>
+          <td class="url"><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.url }}</a></td>
           <td>{{ item.probe_name }}</td>
           <td>{{ item.proxy_display or '—' }}</td>
           <td class="{% if item.is_up %}status-up{% elif item.is_down %}status-down{% else %}status-pending{% endif %}">{{ 'UP' if item.is_up else ('DOWN' if item.is_down else 'WAIT') }}</td>
