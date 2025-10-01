@@ -94,9 +94,13 @@ if (APP_DIR / "static").exists():
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
+
 @app.get("/court_list")
 async def court_list():
-    court_list = _load_targets()
+    court_list = [
+        {"region_code": t[0], "region_name": t[1], "court_code": t[2], "url": t[3]}
+        for t in _load_targets()
+    ]
     return court_list
 
 
@@ -196,7 +200,10 @@ def _load_targets() -> Sequence[str]:
             "SELECT region_code, region_name, court_code, url FROM courts WHERE url <> '' ORDER BY court_code"
         ).fetchall()
     print(len(rows))
-    return [(row["region_code"], row["region_name"], row["court_code"], row["url"]) for row in rows]
+    return [
+        (row["region_code"], row["region_name"], row["court_code"], row["url"])
+        for row in rows
+    ]
 
 
 def _initialize_status_cache() -> None:

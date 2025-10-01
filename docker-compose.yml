@@ -1,7 +1,6 @@
 services:
-  courts_probe:
+  courts-probe:
     build: .
-    container_name: courts-probe
     environment:
       - HOST=0.0.0.0
       - PORT=8000
